@@ -7,7 +7,7 @@ gazelle(name = "gazelle")
 
 build_plugin_image(
     name = "image",
-    plugin = "robot-gitee-courier",
+    plugin = "robot-gitee-hook-delivery",
 )
 
 push_image(
@@ -24,7 +24,7 @@ go_library(
         "main.go",
         "robot.go",
     ],
-    importpath = "github.com/opensourceways/robot-gitee-courier",
+    importpath = "github.com/opensourceways/robot-gitee-hook-delivery",
     visibility = ["//visibility:private"],
     deps = [
         "@com_github_opensourceways_community_robot_lib//config:go_default_library",
@@ -39,7 +39,7 @@ go_library(
 )
 
 go_binary(
-    name = "robot-gitee-courier",
+    name = "robot-gitee-hook-delivery",
     embed = [":go_default_library"],
     visibility = ["//visibility:public"],
 )
