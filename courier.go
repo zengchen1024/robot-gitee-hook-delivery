@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"sync"
 
-	"github.com/opensourceways/community-robot-lib/giteeclient"
 	"github.com/opensourceways/community-robot-lib/kafka"
 	"github.com/opensourceways/community-robot-lib/mq"
 	"github.com/sirupsen/logrus"
@@ -13,7 +13,6 @@ import (
 
 type courier struct {
 	wg    sync.WaitGroup
-	hmac  func() string
 	topic string
 }
 
@@ -23,11 +22,10 @@ func (c *courier) wait() {
 
 // ServeHTTP validates an incoming webhook and puts it into the event channel.
 func (c *courier) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	eventType, eventGUID, payload, _, ok := giteeclient.ValidateWebhook(w, r, c.hmac)
+	eventType, eventGUID, payload, _, ok := c.parsePayload(w, r)
 	if !ok {
 		return
 	}
-	fmt.Fprint(w, "Event received. Have a nice day.")
 
 	l := logrus.WithFields(
 		logrus.Fields{
@@ -67,4 +65,64 @@ func (c *courier) publish(payload []byte, h http.Header, l *logrus.Entry) error 
 	}()
 
 	return nil
+}
+
+func (c *courier) parsePayload(
+	w http.ResponseWriter, r *http.Request,
+) (eventType string, eventGUID string, payload []byte, status int, ok bool) {
+	defer r.Body.Close()
+
+	// Header checks: It must be a POST with an event type and a signature.
+	if r.Method != http.MethodPost {
+		status = http.StatusMethodNotAllowed
+		responseHTTPError(w, status, "405 Method not allowed")
+		return
+	}
+
+	if v := r.Header.Get("content-type"); v != "application/json" {
+		status = http.StatusBadRequest
+		responseHTTPError(w, status, "400 Bad Request: Hook only accepts content-type: application/json")
+		return
+	}
+
+	if eventType = r.Header.Get("X-Gitee-Event"); eventType == "" {
+		status = http.StatusBadRequest
+		responseHTTPError(w, status, "400 Bad Request: Missing X-Gitee-Event Header")
+		return
+	}
+
+	if eventGUID = r.Header.Get("X-Gitee-Timestamp"); eventGUID == "" {
+		status = http.StatusBadRequest
+		responseHTTPError(w, status, "400 Bad Request: Missing X-Gitee-Timestamp Header")
+		return
+	}
+
+	sig := r.Header.Get("X-Gitee-Token")
+	if sig == "" {
+		status = http.StatusForbidden
+		responseHTTPError(w, status, "403 Forbidden: Missing X-Gitee-Token")
+		return
+	}
+
+	payload, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		status = http.StatusInternalServerError
+		responseHTTPError(w, status, "500 Internal Server Error: Failed to read request body")
+		return
+	}
+
+	status = http.StatusOK
+	ok = true
+	return
+}
+
+func responseHTTPError(w http.ResponseWriter, statusCode int, response string) {
+	logrus.WithFields(
+		logrus.Fields{
+			"response":    response,
+			"status-code": statusCode,
+		},
+	).Debug(response)
+
+	http.Error(w, response, statusCode)
 }

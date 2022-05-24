@@ -13,7 +13,6 @@ import (
 	"github.com/opensourceways/community-robot-lib/logrusutil"
 	"github.com/opensourceways/community-robot-lib/mq"
 	liboptions "github.com/opensourceways/community-robot-lib/options"
-	"github.com/opensourceways/community-robot-lib/secret"
 	"github.com/sirupsen/logrus"
 )
 
@@ -21,7 +20,6 @@ const component = "robot-gitee-hook-delivery"
 
 type options struct {
 	service        liboptions.ServiceOptions
-	hmacSecretFile string
 	topic          string
 }
 
@@ -38,7 +36,6 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 
 	o.service.AddFlags(fs)
 
-	fs.StringVar(&o.hmacSecretFile, "hmac-secret-file", "/etc/webhook/hmac", "Path to the file containing the HMAC secret.")
 	fs.StringVar(&o.topic, "topic", "", "The topic to which gitee webhook messages need to be published ")
 
 	_ = fs.Parse(args)
@@ -60,21 +57,7 @@ func main() {
 		logrus.WithError(err).Fatal("Error starting config agent.")
 	}
 
-	secretAgent := new(secret.Agent)
-	if err := secretAgent.Start([]string{o.hmacSecretFile}); err != nil {
-		logrus.WithError(err).Fatal("Error starting secret agent.")
-	}
-
-	defer secretAgent.Stop()
-
-	gethmac := secretAgent.GetTokenGenerator(o.hmacSecretFile)
-
-	c := courier{
-		topic: o.topic,
-		hmac: func() string {
-			return string(gethmac())
-		},
-	}
+	c := courier{topic: o.topic}
 
 	if err := initBroker(configAgent); err != nil {
 		logrus.WithError(err).Fatal("Error init broker.")
