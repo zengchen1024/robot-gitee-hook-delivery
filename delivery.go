@@ -12,9 +12,10 @@ import (
 )
 
 type delivery struct {
-	wg    sync.WaitGroup
-	hmac  func() string
-	topic string
+	wg        sync.WaitGroup
+	hmac      func() string
+	topic     string
+	userAgent string
 }
 
 func (d *delivery) wait() {
@@ -39,6 +40,7 @@ func (d *delivery) publish(payload []byte, h http.Header, eventType, eventGUID s
 			"X-Gitee-Event":     h.Get("X-Gitee-Event"),
 			"X-Gitee-Timestamp": h.Get("X-Gitee-Timestamp"),
 			"X-Gitee-Token":     h.Get("X-Gitee-Token"),
+			"User-Agent":        d.userAgent,
 		},
 		Body: payload,
 	}

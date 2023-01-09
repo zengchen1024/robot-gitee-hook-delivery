@@ -33,7 +33,10 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 
 	o.service.AddFlags(fs)
 
-	fs.StringVar(&o.hmacSecretFile, "hmac-secret-file", "/etc/webhook/hmac", "Path to the file containing the HMAC secret.")
+	fs.StringVar(
+		&o.hmacSecretFile, "hmac-secret-file", "/etc/webhook/hmac",
+		"Path to the file containing the HMAC secret.",
+	)
 
 	_ = fs.Parse(args)
 	return o
@@ -50,14 +53,20 @@ func main() {
 		logrus.WithError(err).Fatal("invalid options")
 	}
 
+	// cfg
 	cfg, err := loadConfig(o.service.ConfigFile)
 	if err != nil {
 		logrus.WithError(err).Fatal("load config")
 	}
 
-	// mq
-	if err := initBroker(&cfg); err != nil {
-		logrus.WithError(err).Fatal("Error init broker.")
+	// init kafka
+	kafkaCfg, err := cfg.kafkaConfig()
+	if err != nil {
+		logrus.Fatalf("load kafka config, err:%s", err.Error())
+	}
+
+	if err := connetKafka(&kafkaCfg); err != nil {
+		logrus.Fatalf("connect kafka, err:%s", err.Error())
 	}
 
 	defer func() {
@@ -78,7 +87,8 @@ func main() {
 
 	// server
 	d := delivery{
-		topic: cfg.Topic,
+		topic:     cfg.Topic,
+		userAgent: cfg.UserAgent,
 		hmac: func() string {
 			return string(hmac())
 		},
@@ -103,18 +113,17 @@ func run(d *delivery, port int, gracePeriod time.Duration) {
 	interrupts.ListenAndServe(httpServer, gracePeriod)
 }
 
-func initBroker(cfg *configuration) error {
-	tlsConfig, err := cfg.Config.TLSConfig.TLSConfig()
+func connetKafka(cfg *mq.MQConfig) error {
+	tlsConfig, err := cfg.TLSConfig.TLSConfig()
 	if err != nil {
 		return err
 	}
 
 	err = kafka.Init(
-		mq.Addresses(cfg.Config.Addresses...),
+		mq.Addresses(cfg.Addresses...),
 		mq.SetTLSConfig(tlsConfig),
-		mq.Log(logrus.WithField("module", "broker")),
+		mq.Log(logrus.WithField("module", "kfk")),
 	)
-
 	if err != nil {
 		return err
 	}
