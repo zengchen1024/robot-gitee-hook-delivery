@@ -59,7 +59,7 @@ func (d *delivery) publish(payload []byte, h http.Header, eventType, eventGUID s
 		if err := kafka.Publish(d.topic, &msg); err != nil {
 			l.Errorf("failed to publish msg, err:%s", err.Error())
 		} else {
-			l.Infof("publish message to topic(%s) successfully", d.topic)
+			l.Debugf("publish message to topic(%s) successfully", d.topic)
 		}
 	}()
 }

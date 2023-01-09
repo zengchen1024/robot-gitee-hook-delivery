@@ -33,7 +33,6 @@ func (c *configuration) validate() error {
 
 func (c *configuration) kafkaConfig() (cfg mq.MQConfig, err error) {
 	v := strings.Split(c.KafkaAddress, ",")
-
 	if err = kafka.ValidateConnectingAddress(v); err == nil {
 		cfg.Addresses = v
 	}
