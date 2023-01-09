@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"regexp"
 	"strings"
 
 	"github.com/opensourceways/community-robot-lib/kafka"
@@ -33,36 +32,13 @@ func (c *configuration) validate() error {
 }
 
 func (c *configuration) kafkaConfig() (cfg mq.MQConfig, err error) {
-	addresses := parseAddress(c.KafkaAddress)
-	if len(addresses) == 0 {
-		err = errors.New("no valid address for kafka")
+	v := strings.Split(c.KafkaAddress, ",")
 
-		return
+	if err = kafka.ValidateConnectingAddress(v); err == nil {
+		cfg.Addresses = v
 	}
-
-	if err = kafka.ValidateConnectingAddress(addresses); err != nil {
-		return
-	}
-
-	cfg.Addresses = addresses
 
 	return
-}
-
-func parseAddress(addresses string) []string {
-	var reIpPort = regexp.MustCompile(
-		`^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}:[1-9][0-9]*$`,
-	)
-
-	v := strings.Split(addresses, ",")
-	r := make([]string, 0, len(v))
-	for i := range v {
-		if reIpPort.MatchString(v[i]) {
-			r = append(r, v[i])
-		}
-	}
-
-	return r
 }
 
 func loadConfig(path string) (cfg configuration, err error) {
