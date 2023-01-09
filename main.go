@@ -1,11 +1,11 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/opensourceways/community-robot-lib/config"
 	"github.com/opensourceways/community-robot-lib/interrupts"
@@ -13,6 +13,7 @@ import (
 	"github.com/opensourceways/community-robot-lib/logrusutil"
 	"github.com/opensourceways/community-robot-lib/mq"
 	liboptions "github.com/opensourceways/community-robot-lib/options"
+	"github.com/opensourceways/community-robot-lib/secret"
 	"github.com/sirupsen/logrus"
 )
 
@@ -20,13 +21,10 @@ const component = "robot-gitee-hook-delivery"
 
 type options struct {
 	service        liboptions.ServiceOptions
-	topic          string
+	hmacSecretFile string
 }
 
 func (o *options) Validate() error {
-	if o.topic == "" {
-		return errors.New("please set topic")
-	}
 
 	return o.service.Validate()
 }
@@ -36,7 +34,7 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 
 	o.service.AddFlags(fs)
 
-	fs.StringVar(&o.topic, "topic", "", "The topic to which gitee webhook messages need to be published ")
+	fs.StringVar(&o.hmacSecretFile, "hmac-secret-file", "/etc/webhook/hmac", "Path to the file containing the HMAC secret.")
 
 	_ = fs.Parse(args)
 	return o
@@ -57,9 +55,30 @@ func main() {
 		logrus.WithError(err).Fatal("Error starting config agent.")
 	}
 
-	c := courier{topic: o.topic}
+	getConfiguration := func() *configuration {
+		cfgn := new(configuration)
+		_, cfg := configAgent.GetConfig()
 
-	if err := initBroker(configAgent); err != nil {
+		if v, ok := cfg.(*configuration); ok {
+			cfgn = v
+		}
+
+		return cfgn
+	}
+
+	secretAgent := new(secret.Agent)
+	if err := secretAgent.Start([]string{o.hmacSecretFile}); err != nil {
+		logrus.WithError(err).Fatal("Error starting secret agent.")
+	}
+
+	gethmac := secretAgent.GetTokenGenerator(o.hmacSecretFile)
+
+	cfg := getConfiguration()
+	c := courier{topic: cfg.Topic, hmac: func() string {
+		return string(gethmac())
+	}}
+
+	if err := initBroker(cfg); err != nil {
 		logrus.WithError(err).Fatal("Error init broker.")
 	}
 
@@ -72,25 +91,23 @@ func main() {
 		c.wait()
 	})
 
+	run(&c, o.service.Port, o.service.GracePeriod)
+}
+
+func run(c *courier, port int, gracePeriod time.Duration) {
+
 	// Return 200 on / for health checks.
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {})
 
 	// For /hook, handle a webhook normally.
-	http.Handle("/gitee-hook", &c)
+	http.Handle("/gitee-hook", c)
 
-	httpServer := &http.Server{Addr: ":" + strconv.Itoa(o.service.Port)}
+	httpServer := &http.Server{Addr: ":" + strconv.Itoa(port)}
 
-	interrupts.ListenAndServe(httpServer, o.service.GracePeriod)
+	interrupts.ListenAndServe(httpServer, gracePeriod)
 }
 
-func initBroker(agent config.ConfigAgent) error {
-	cfg := &configuration{}
-	_, c := agent.GetConfig()
-
-	if v, ok := c.(*configuration); ok {
-		cfg = v
-	}
-
+func initBroker(cfg *configuration) error {
 	tlsConfig, err := cfg.Config.TLSConfig.TLSConfig()
 	if err != nil {
 		return err
