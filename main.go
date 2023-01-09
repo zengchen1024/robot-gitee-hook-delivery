@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/opensourceways/community-robot-lib/config"
 	"github.com/opensourceways/community-robot-lib/interrupts"
 	"github.com/opensourceways/community-robot-lib/kafka"
 	"github.com/opensourceways/community-robot-lib/logrusutil"
@@ -34,7 +33,10 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 
 	o.service.AddFlags(fs)
 
-	fs.StringVar(&o.hmacSecretFile, "hmac-secret-file", "/etc/webhook/hmac", "Path to the file containing the HMAC secret.")
+	fs.StringVar(
+		&o.hmacSecretFile, "hmac-secret-file", "/etc/webhook/hmac",
+		"Path to the file containing the HMAC secret.",
+	)
 
 	_ = fs.Parse(args)
 	return o
@@ -43,82 +45,85 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 func main() {
 	logrusutil.ComponentInit(component)
 
-	o := gatherOptions(flag.NewFlagSet(os.Args[0], flag.ExitOnError), os.Args[1:]...)
+	o := gatherOptions(
+		flag.NewFlagSet(os.Args[0], flag.ExitOnError),
+		os.Args[1:]...,
+	)
 	if err := o.Validate(); err != nil {
-		logrus.WithError(err).Fatal("Invalid options")
+		logrus.WithError(err).Fatal("invalid options")
 	}
 
-	configAgent := config.NewConfigAgent(func() config.Config {
-		return new(configuration)
-	})
-	if err := configAgent.Start(o.service.ConfigFile); err != nil {
-		logrus.WithError(err).Fatal("Error starting config agent.")
+	// cfg
+	cfg, err := loadConfig(o.service.ConfigFile)
+	if err != nil {
+		logrus.WithError(err).Fatal("load config")
 	}
 
-	getConfiguration := func() *configuration {
-		cfgn := new(configuration)
-		_, cfg := configAgent.GetConfig()
+	// init kafka
+	kafkaCfg, err := cfg.kafkaConfig()
+	if err != nil {
+		logrus.Fatalf("load kafka config, err:%s", err.Error())
+	}
 
-		if v, ok := cfg.(*configuration); ok {
-			cfgn = v
+	if err := connetKafka(&kafkaCfg); err != nil {
+		logrus.Fatalf("connect kafka, err:%s", err.Error())
+	}
+
+	defer func() {
+		if err := kafka.Disconnect(); err != nil {
+			logrus.Errorf("disconnet the mq failed, err:%s", err.Error())
 		}
+	}()
 
-		return cfgn
-	}
-
+	// hmac
 	secretAgent := new(secret.Agent)
 	if err := secretAgent.Start([]string{o.hmacSecretFile}); err != nil {
-		logrus.WithError(err).Fatal("Error starting secret agent.")
+		logrus.WithError(err).Fatal("start secret agent.")
 	}
 
-	gethmac := secretAgent.GetTokenGenerator(o.hmacSecretFile)
+	defer secretAgent.Stop()
 
-	cfg := getConfiguration()
-	c := courier{topic: cfg.Topic, hmac: func() string {
-		return string(gethmac())
-	}}
+	hmac := secretAgent.GetTokenGenerator(o.hmacSecretFile)
 
-	if err := initBroker(cfg); err != nil {
-		logrus.WithError(err).Fatal("Error init broker.")
+	// server
+	d := delivery{
+		topic:     cfg.Topic,
+		userAgent: cfg.UserAgent,
+		hmac: func() string {
+			return string(hmac())
+		},
 	}
 
-	defer interrupts.WaitForGracefulShutdown()
-	interrupts.OnInterrupt(func() {
-		configAgent.Stop()
+	defer d.wait()
 
-		_ = kafka.Disconnect()
-
-		c.wait()
-	})
-
-	run(&c, o.service.Port, o.service.GracePeriod)
+	run(&d, o.service.Port, o.service.GracePeriod)
 }
 
-func run(c *courier, port int, gracePeriod time.Duration) {
+func run(d *delivery, port int, gracePeriod time.Duration) {
+	defer interrupts.WaitForGracefulShutdown()
 
 	// Return 200 on / for health checks.
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {})
 
-	// For /hook, handle a webhook normally.
-	http.Handle("/gitee-hook", c)
+	// For /gitee-hook, handle a webhook normally.
+	http.Handle("/gitee-hook", d)
 
 	httpServer := &http.Server{Addr: ":" + strconv.Itoa(port)}
 
 	interrupts.ListenAndServe(httpServer, gracePeriod)
 }
 
-func initBroker(cfg *configuration) error {
-	tlsConfig, err := cfg.Config.TLSConfig.TLSConfig()
+func connetKafka(cfg *mq.MQConfig) error {
+	tlsConfig, err := cfg.TLSConfig.TLSConfig()
 	if err != nil {
 		return err
 	}
 
 	err = kafka.Init(
-		mq.Addresses(cfg.Config.Addresses...),
+		mq.Addresses(cfg.Addresses...),
 		mq.SetTLSConfig(tlsConfig),
-		mq.Log(logrus.WithField("module", "broker")),
+		mq.Log(logrus.WithField("module", "kfk")),
 	)
-
 	if err != nil {
 		return err
 	}
