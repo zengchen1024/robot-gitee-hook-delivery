@@ -20,6 +20,7 @@ const component = "robot-gitee-hook-delivery"
 
 type options struct {
 	service        liboptions.ServiceOptions
+	enableDebug    bool
 	hmacSecretFile string
 }
 
@@ -32,6 +33,11 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 	var o options
 
 	o.service.AddFlags(fs)
+
+	fs.BoolVar(
+		&o.enableDebug, "enable_debug", false,
+		"whether to enable debug model.",
+	)
 
 	fs.StringVar(
 		&o.hmacSecretFile, "hmac-secret-file", "/etc/webhook/hmac",
@@ -51,6 +57,11 @@ func main() {
 	)
 	if err := o.Validate(); err != nil {
 		logrus.WithError(err).Fatal("invalid options")
+	}
+
+	if o.enableDebug {
+		logrus.SetLevel(logrus.DebugLevel)
+		logrus.Debug("debug enabled.")
 	}
 
 	// cfg
