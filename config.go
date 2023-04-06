@@ -5,11 +5,11 @@ import (
 
 	"github.com/opensourceways/server-common-lib/utils"
 
-	"github.com/opensourceways/kafka-lib/agent"
+	kafka "github.com/opensourceways/kafka-lib/agent"
 )
 
 type configuration struct {
-	Kafka     agent.Config `json:"kafka"          required:"true"`
+	Kafka     kafka.Config `json:"kafka"          required:"true"`
 	Topic     string       `json:"topic"          required:"true"`
 	UserAgent string       `json:"user_agent"     required:"true"`
 }

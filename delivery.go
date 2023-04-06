@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/opensourceways/kafka-lib/agent"
+	kafka "github.com/opensourceways/kafka-lib/agent"
 	"github.com/opensourceways/robot-gitee-lib/client"
 	"github.com/sirupsen/logrus"
 )
@@ -52,7 +52,7 @@ func (d *delivery) publish(payload []byte, h http.Header, eventType, eventGUID s
 			},
 		)
 
-		if err := agent.Publish(d.topic, header, payload); err != nil {
+		if err := kafka.Publish(d.topic, header, payload); err != nil {
 			l.Errorf("failed to publish msg, err:%s", err.Error())
 		} else {
 			l.Debugf("publish message to topic(%s) successfully", d.topic)

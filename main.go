@@ -56,7 +56,7 @@ func main() {
 		os.Args[1:]...,
 	)
 	if err := o.Validate(); err != nil {
-		logrus.Fatalf("invalid options, err:%s", err.Error())
+		logrus.Errorf("invalid options, err:%s", err.Error())
 
 		return
 	}
@@ -69,14 +69,14 @@ func main() {
 	// cfg
 	cfg, err := loadConfig(o.service.ConfigFile)
 	if err != nil {
-		logrus.Fatalf("load config, err:%s", err.Error())
+		logrus.Errorf("load config, err:%s", err.Error())
 
 		return
 	}
 
 	// init kafka
 	if err := kafka.Init(&cfg.Kafka, log); err != nil {
-		logrus.Fatalf("init kafka, err:%s", err.Error())
+		logrus.Errorf("init kafka, err:%s", err.Error())
 
 		return
 	}
@@ -86,7 +86,9 @@ func main() {
 	// hmac
 	secretAgent := new(secret.Agent)
 	if err := secretAgent.Start([]string{o.hmacSecretFile}); err != nil {
-		logrus.WithError(err).Fatal("start secret agent.")
+		logrus.Errorf("start secret agent, err:%s", err.Error())
+
+		return
 	}
 
 	defer secretAgent.Stop()
